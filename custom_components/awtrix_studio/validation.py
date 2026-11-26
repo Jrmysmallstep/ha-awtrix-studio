@@ -24,6 +24,7 @@ from .const import (
     COLOR_STEPS,
     CONF_ACTIVE_STATE,
     CONF_APP_NAME,
+    CONF_ATTRIBUTE,
     CONF_COLOR,
     CONF_COLOR_1,
     CONF_COLOR_2,
@@ -41,6 +42,8 @@ from .const import (
     CONF_HIDE_WHEN_EMPTY,
     CONF_HIDE_WHEN_ZERO,
     CONF_ICON,
+    CONF_ICON_ENTITY,
+    CONF_ICON_STATES,
     CONF_INDICATOR,
     CONF_LABEL,
     CONF_LABEL_COLOR,
@@ -83,6 +86,7 @@ from .const import (
     LAYOUT_TWO_LINES,
     LAYOUT_VALUE_BAR,
     LAYOUTS,
+    MAX_ICON_STATES,
     MAX_LIFETIME,
     MAX_PAGE_INTERVAL,
     MAX_SEGMENTS,
@@ -107,6 +111,7 @@ from .templates import (
 )
 
 MAX_TEXT = 64
+ATTRIBUTE_RE = re.compile(r"^[A-Za-z0-9_]+$")
 MAX_TEMPLATE = 20_000
 
 
@@ -285,6 +290,11 @@ def _segment(data: Mapping[str, Any]) -> dict[str, Any]:
         CONF_SHOW_UNIT: _bool(data, CONF_SHOW_UNIT, True),
         CONF_HIDE_WHEN_ZERO: _bool(data, CONF_HIDE_WHEN_ZERO, False),
     }
+    # Only kept when typed: the entity's state otherwise.
+    if attribute := _text(data, CONF_ATTRIBUTE):
+        if not ATTRIBUTE_RE.fullmatch(attribute):
+            raise Invalid(CONF_ATTRIBUTE, "invalid_value")
+        clean[CONF_ATTRIBUTE] = attribute
     # Only kept when chosen: the label takes the value's color otherwise.
     if (label_color := _color(data, CONF_LABEL_COLOR, None)) is not None:
         clean[CONF_LABEL_COLOR] = label_color
@@ -296,6 +306,31 @@ def _segment(data: Mapping[str, Any]) -> dict[str, Any]:
         clean[CONF_UNIT] = unit
     clean.update(_app_colors(data))
     return clean
+
+
+def _icon_follows(data: Mapping[str, Any]) -> dict[str, Any]:
+    """The icon that follows the state of an entity: which entity, which icons.
+
+    The app's own icon is the one for the states the table does not list, so
+    it is required.
+    """
+    entity = data.get(CONF_ICON_ENTITY)
+    if entity in (None, ""):
+        return {}
+    if not isinstance(entity, str) or not ENTITY_ID_RE.fullmatch(entity):
+        raise Invalid(CONF_ICON_ENTITY, "invalid_entity")
+    table = data.get(CONF_ICON_STATES)
+    if not isinstance(table, Mapping) or len(table) > MAX_ICON_STATES:
+        raise Invalid(CONF_ICON_STATES, "invalid_value")
+    icons: dict[str, str] = {}
+    for state in table:
+        if not isinstance(state, str) or not state.strip() or len(state) > MAX_TEXT:
+            raise Invalid(CONF_ICON_STATES, "invalid_value")
+        if name := _text(table, state):
+            icons[state.strip()] = name
+    if icons and not _text(data, CONF_ICON):
+        raise Invalid(CONF_ICON, "icon_default_required")
+    return {CONF_ICON_ENTITY: entity, CONF_ICON_STATES: icons}
 
 
 def _segments(data: Mapping[str, Any]) -> dict[str, Any]:
@@ -418,6 +453,7 @@ def normalize_app(
             CONF_ICON: _text(data, CONF_ICON),
         }
         clean.update(_segments(data))
+        clean.update(_icon_follows(data))
         layout = _layout(
             data, entry.data[CONF_FIRMWARE], len(clean.get(CONF_SEGMENTS, []))
         )

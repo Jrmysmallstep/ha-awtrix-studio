@@ -51,6 +51,32 @@ CONF_LABEL: Final = "label"
 # The label's own color; without it, the label takes the value's color.
 CONF_LABEL_COLOR: Final = "label_color"
 CONF_ICON: Final = "icon"
+# Read this attribute of the entity instead of its state (a weather entity's
+# temperature, say).
+CONF_ATTRIBUTE: Final = "attribute"
+# The icon follows the state of an entity: icon_states maps each state to an
+# icon, and `icon` is the one for any other state.
+CONF_ICON_ENTITY: Final = "icon_entity_id"
+CONF_ICON_STATES: Final = "icon_states"
+# The states of a Home Assistant weather entity, to start a table of icons.
+WEATHER_CONDITIONS: Final = (
+    "clear-night",
+    "cloudy",
+    "exceptional",
+    "fog",
+    "hail",
+    "lightning",
+    "lightning-rainy",
+    "partlycloudy",
+    "pouring",
+    "rainy",
+    "snowy",
+    "snowy-rainy",
+    "sunny",
+    "windy",
+    "windy-variant",
+)
+MAX_ICON_STATES: Final = 40
 CONF_COLOR: Final = "color"
 CONF_DECIMALS: Final = "decimals"
 CONF_SHOW_UNIT: Final = "show_unit"

@@ -95,6 +95,12 @@ Choisissez une entité, ajoutez un libellé, une icône et des couleurs, et c'es
 
 L'app quitte aussi la rotation d'elle-même tant que son entité est indisponible.
 
+### Météo : une icône qui suit le temps
+
+L'onglet **Météo** d'une app est le mode simple, avec une icône qui change selon l'état d'une entité. Choisis une entité météo (Météo-France, Met.no, OpenWeatherMap…), puis une icône pour chacun de ses états : ensoleillé, nuageux, pluie, neige, orage… Les icônes viennent de la galerie LaMetric, animées comprises. Un état laissé vide affiche l'**icône par défaut**.
+
+La valeur affichée peut être un attribut d'une entité plutôt que son état : **Valeur à afficher** liste les attributs de l'entité, donc la `temperature` d'une entité météo peut servir de texte, sans capteur en plus. Cela marche pour toute app simple, et l'icône peut suivre l'état de n'importe quelle entité, pas seulement une entité météo : ajoute les états voulus dans le tableau.
+
 ### Le mode modèle : liberté totale
 
 Pour aller plus loin (dessins, barres de progression, plusieurs pages), écrivez un modèle Home Assistant qui produit le JSON de l'horloge. L'aperçu montre chaque page, les fait alterner comme l'horloge, et signale tout de suite ce qui cloche. Ici, les deux prochains trams, un par ligne d'un TC002.

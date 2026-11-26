@@ -95,6 +95,12 @@ Choose an entity, add a label, an icon and colors, and you're done. The preview 
 
 The app also leaves the rotation by itself while its entity is unavailable.
 
+### Weather: an icon that follows the weather
+
+The **Weather** tab of an app is the simple mode with an icon that changes with the state of an entity. Pick a weather entity (Météo-France, Met.no, OpenWeatherMap…), then an icon for each of its states: sunny, cloudy, rain, snow, thunderstorm… Icons come from the LaMetric gallery, animated ones included. A state left empty shows the **default icon**.
+
+The value shown can be an attribute of an entity instead of its state: **Value to show** lists the attributes of the entity, so a weather entity's `temperature` can be the text, with no extra sensor. This works for any simple app, and the icon can follow the state of any entity, not only a weather one: add the states you want in the table.
+
 ### Template mode: full control
 
 For anything more creative (drawings, progress bars, several pages), write a Home Assistant template that produces the clock's JSON. The preview shows each page, alternates them like the clock does, and tells you right away if something is wrong. Here, the next two trams, one per line of a TC002.

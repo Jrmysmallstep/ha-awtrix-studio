@@ -45,6 +45,7 @@ from .const import (
     COLOR_STEPS,
     CONF_ACTIVE_STATE,
     CONF_APP_NAME,
+    CONF_ATTRIBUTE,
     CONF_COLOR,
     CONF_COLOR_1,
     CONF_COLOR_2,
@@ -66,6 +67,8 @@ from .const import (
     CONF_HIDE_WHEN_ZERO,
     CONF_HOLD,
     CONF_ICON,
+    CONF_ICON_ENTITY,
+    CONF_ICON_STATES,
     CONF_INDICATOR,
     CONF_LABEL,
     CONF_LABEL_COLOR,
@@ -578,6 +581,17 @@ class _LiveSubentryFlow(ConfigSubentryFlow):
                 **data,
                 CONF_SEGMENTS: self._current[CONF_SEGMENTS],
                 CONF_SEPARATOR: self._current.get(CONF_SEPARATOR, DEFAULT_SEPARATOR),
+            }
+        # So are the attribute of the first entity, and the icons that follow
+        # the state of an entity.
+        if data.get(CONF_MODE) == MODE_SIMPLE:
+            data = {
+                **data,
+                **{
+                    key: self._current[key]
+                    for key in (CONF_ATTRIBUTE, CONF_ICON_ENTITY, CONF_ICON_STATES)
+                    if key in self._current
+                },
             }
         # So are the color of the first entity's label, and a template app's
         # default icon.

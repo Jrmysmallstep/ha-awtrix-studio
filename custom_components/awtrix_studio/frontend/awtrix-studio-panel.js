@@ -22,7 +22,11 @@ const MIRROR_STALE_MS = 5000;
 // all of them in `segments`.
 const MAX_SEGMENTS = 5;
 const SEGMENT_KEYS = ["entity_id", "label", "label_color", "color", "decimals", "show_unit", "unit", "hide_when_zero", "threshold_1", "color_1",
-  "threshold_2", "color_2", "color_mode", "gradient", "_presetTouched", "gradient_min", "gradient_max", "gradient_stops", "font", "align"];
+  "threshold_2", "color_2", "color_mode", "gradient", "_presetTouched", "gradient_min", "gradient_max", "gradient_stops", "font", "align", "attribute"];
+
+// The states of a weather entity, each of which can have its own icon.
+const WEATHER_CONDITIONS = ["sunny", "clear-night", "partlycloudy", "cloudy", "fog", "rainy", "pouring", "lightning", "lightning-rainy",
+  "snowy", "snowy-rainy", "hail", "windy", "windy-variant", "exceptional"];
 
 // AWTRIX 3 background effects, palettes and weather overlays.
 const EFFECTS = ["BrickBreaker", "Checkerboard", "ColorWaves", "Fade", "Fireworks", "LookingEyes", "Matrix", "MovingLine", "Pacifica",
@@ -309,6 +313,10 @@ pre { margin: 0; padding: 12px; border-radius: 8px; font-family: var(--ha-font-f
 details summary { cursor: pointer; font-size: 13px; }
 details pre { margin-top: 8px; }
 .icon-row { flex-wrap: nowrap; }
+.weather-rows { display: grid; gap: 6px; margin-bottom: 8px; }
+.weather-row { flex-wrap: nowrap; align-items: center; }
+.weather-row input { flex: 1; min-width: 0; }
+.weather-state { flex: none; width: 12em; }
 .icon-row input { flex: 1; min-width: 0; }
 .icon-preview { width: 38px; height: 38px; flex: none; border-radius: 6px; image-rendering: pixelated; background: #0b0b0d; }
 .picker-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 10; display: flex; align-items: center; justify-content: center; padding: 16px; }
@@ -1161,6 +1169,9 @@ class AwtrixStudioPanel extends HTMLElement {
         segment: 0,
         separator: typeof d.separator === "string" ? d.separator : " ",
         icon: d.icon || "",
+        weather: Boolean(d.icon_entity_id),
+        icon_entity_id: d.icon_entity_id || "",
+        icon_states: { ...(d.icon_states || {}) },
         layout: d.layout || (kind === "notification" && this._layoutsAvailable() ? "line" : ""),
         value_font: d.value_font || VALUE_FONTS[0],
         text_font: d.text_font || TEXT_FONTS[0],
@@ -1199,6 +1210,7 @@ class AwtrixStudioPanel extends HTMLElement {
   _segmentForm(d) {
     return {
       entity_id: d.entity_id || "",
+      attribute: d.attribute || "",
       label: d.label || "",
       // Empty: the label takes the value's color.
       label_color: d.label_color ? toHex(d.label_color, "#FFFFFF") : "",
@@ -1347,7 +1359,7 @@ class AwtrixStudioPanel extends HTMLElement {
   }
 
   _segmentPayload(s) {
-    return { entity_id: s.entity_id, label: s.label, label_color: s.label_color, font: s.font, align: s.align, color: s.color, decimals: numberOrEmpty(s.decimals),
+    return { entity_id: s.entity_id, attribute: s.attribute, label: s.label, label_color: s.label_color, font: s.font, align: s.align, color: s.color, decimals: numberOrEmpty(s.decimals),
       show_unit: s.show_unit, unit: s.unit, hide_when_zero: s.hide_when_zero,
       threshold_1: numberOrEmpty(s.threshold_1), color_1: s.color_1, threshold_2: numberOrEmpty(s.threshold_2), color_2: s.color_2,
       ...this._gradientPayload(s) };
@@ -1360,7 +1372,7 @@ class AwtrixStudioPanel extends HTMLElement {
     if (kind === "app" && f.mode === "simple") {
       this._syncSegment();
       const [first, ...next] = f.segments.map((s) => this._segmentPayload(s));
-      return { mode: "simple", app_name: f.app_name, ...first, segments: next, separator: f.separator, icon: f.icon,
+      return { mode: "simple", app_name: f.app_name, ...first, segments: next, separator: f.separator, icon: f.icon, ...this._weatherPayload(),
         layout: f.layout, value_font: f.value_font, text_font: f.text_font, ...this._progressPayload(), display: this._displayPayload() };
     }
     if (kind === "app") {
@@ -1548,8 +1560,10 @@ class AwtrixStudioPanel extends HTMLElement {
     this._errors = {};
     this._fieldsBox = h("div", { class: "fields" });
     this._modeTabs = h("div", { class: "tabs", role: "tablist", "aria-label": this.t("mode") });
-    ["simple", "template"].forEach((mode) => this._modeTabs.append(
-      h("button", { role: "tab", "aria-selected": this._form.mode === mode ? "true" : "false", onClick: () => this._setMode(mode) }, this.t(mode))));
+    // An app can also follow the weather: its icon changes with the state of a weather entity.
+    this._tabNames = kind === "app" ? ["simple", "weather", "template"] : ["simple", "template"];
+    this._tabNames.forEach((tab) => this._modeTabs.append(
+      h("button", { role: "tab", "aria-selected": this._modeTab() === tab ? "true" : "false", onClick: () => this._setMode(tab) }, this.t(tab))));
     this._saveFeedback = h("div", { class: "feedback", role: "status" });
 
     const actions = h("div", { class: "row" },
@@ -1614,6 +1628,7 @@ class AwtrixStudioPanel extends HTMLElement {
 
   _entityChanged() {
     const f = this._form;
+    this._followAttribute();
     if (this._unitInput) this._unitInput.placeholder = this._entityUnit() || this.t("custom_unit_placeholder");
     if (f.color_mode !== "gradient" || f.gradient === "custom" || !this._hass.states[f.entity_id]) { this._updateGradientBar(); return; }
     const hadRange = f.gradient_min !== "" || f.gradient_max !== "";
@@ -1781,6 +1796,116 @@ class AwtrixStudioPanel extends HTMLElement {
     return h("div", { class: "entity-picker" }, input, list);
   }
 
+  // ------------------------------------------------------------- weather
+
+  /** The icons by state, without the empty ones. */
+  _weatherPayload() {
+    const f = this._form;
+    if (!f.weather) return {};
+    const icons = {};
+    Object.entries(f.icon_states).forEach(([state, name]) => { if (String(name).trim()) icons[state] = String(name).trim(); });
+    return { icon_entity_id: f.icon_entity_id, icon_states: icons };
+  }
+
+  /** A new weather app starts on the first weather entity, showing its temperature. */
+  _startWeather() {
+    const f = this._form;
+    if (f.icon_entity_id) return;
+    const weather = Object.keys(this._hass.states).filter((id) => id.startsWith("weather.")).sort();
+    if (!weather.length) return;
+    f.icon_entity_id = weather[0];
+    if (!f.entity_id) {
+      f.entity_id = weather[0];
+      this._followAttribute();
+    }
+  }
+
+  /** What to read of the entity: a weather entity has no number as its state, but a temperature. */
+  _followAttribute() {
+    const f = this._form;
+    const attributes = this._hass.states[f.entity_id]?.attributes;
+    if (!attributes) return;
+    if (f.attribute && !(f.attribute in attributes)) f.attribute = "";
+    if (!f.attribute && f.entity_id.startsWith("weather.") && "temperature" in attributes) {
+      f.attribute = "temperature";
+      if (!f.unit && attributes.temperature_unit) f.unit = attributes.temperature_unit;
+      if (this._unitInput) this._unitInput.value = f.unit;
+    }
+    this._renderAttribute();
+  }
+
+  /** Read the state of the entity, or one of its attributes. */
+  _attributeField() {
+    this._attributeHost = h("div", { class: "entity-host" });
+    this._renderAttribute();
+    return this._field("attribute", this.t("attribute"), this._attributeHost, this.t("attribute_help"));
+  }
+
+  _renderAttribute() {
+    if (!this._attributeHost) return;
+    const f = this._form;
+    const attributes = this._hass.states[f.entity_id]?.attributes || {};
+    const names = Object.keys(attributes).filter((key) => ["string", "number"].includes(typeof attributes[key]));
+    if (f.attribute && !names.includes(f.attribute)) names.push(f.attribute);
+    const select = h("select", { id: "f-attribute", onChange: (e) => { f.attribute = e.target.value; this._schedulePreview(); } },
+      h("option", { value: "" }, this.t("attribute_state")),
+      ...names.sort().map((name) => h("option", { value: name }, name)));
+    select.value = f.attribute;
+    this._attributeHost.replaceChildren(select);
+  }
+
+  /** An icon for each state of an entity: the weather, here. */
+  _weatherSection() {
+    const f = this._form;
+    const fieldset = h("fieldset", { class: "field wide" }, h("legend", {}, this.t("weather_icons")));
+    const rows = h("div", { class: "weather-rows" });
+    const isWeather = () => f.icon_entity_id.startsWith("weather.");
+    const states = () => [...new Set([...(isWeather() ? WEATHER_CONDITIONS : []), ...Object.keys(f.icon_states)])];
+    const name = (state) => {
+      const key = `condition.${state.replace(/-/g, "_")}`;
+      const label = this.t(key);
+      return label === key ? state : label;
+    };
+    const renderRows = () => {
+      clear(rows);
+      states().forEach((state) => {
+        const canvas = h("canvas", { class: "icon-preview", width: 8, height: 8, "aria-hidden": "true" });
+        let token = 0;
+        const paint = () => {
+          const mine = ++token;
+          this._paintIcon(canvas, f.icon_states[state] || "", () => mine === token);
+        };
+        const input = h("input", { type: "text", maxlength: 64, spellcheck: "false", placeholder: this.t("weather_icon_default"),
+          "aria-label": name(state), value: f.icon_states[state] || "",
+          onInput: (e) => { f.icon_states[state] = e.target.value; paint(); this._schedulePreview(); } });
+        const set = (value) => { f.icon_states[state] = value; input.value = value; paint(); this._schedulePreview(); };
+        rows.append(h("div", { class: "row weather-row" }, h("span", { class: "weather-state", title: state }, name(state)), canvas, input,
+          h("button", { class: "btn small", type: "button", onClick: () => this._openIconPicker(set) }, icon("search"), this.t("icon_pick")),
+          h("button", { class: "icon-btn", type: "button", "aria-label": this.t("weather_icon_clear"), title: this.t("weather_icon_clear"),
+            onClick: () => set("") }, icon("close"))));
+        paint();
+      });
+    };
+    const entity = this._field("icon_entity_id", this.t("weather_entity"),
+      this._entityPicker("icon_entity_id", this.t("weather_entity_placeholder"), () => { renderRows(); this._schedulePreview(); }),
+      this.t("weather_entity_help"), true);
+    // Another state than the weather's own, for any other entity.
+    const custom = h("input", { type: "text", maxlength: 64, spellcheck: "false", placeholder: this.t("weather_add_placeholder") });
+    const add = () => {
+      const state = custom.value.trim();
+      if (!state) return;
+      if (!(state in f.icon_states)) f.icon_states[state] = "";
+      custom.value = "";
+      renderRows();
+    };
+    custom.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } });
+    fieldset.append(entity, rows,
+      h("div", { class: "row" }, custom, h("button", { class: "btn small", type: "button", onClick: add }, icon("plus"), this.t("weather_add_state"))),
+      h("div", { class: "muted" }, this.t("weather_icons_help")));
+    renderRows();
+    return fieldset;
+  }
+
   // ------------------------------------------------------------- icons
 
   _iconField() {
@@ -1794,22 +1919,27 @@ class AwtrixStudioPanel extends HTMLElement {
     this._drawIconPreview();
     // A template app's icon is a default for its pages.
     if (f.mode === "template") return this._field("icon", this.t("default_icon"), control, this.t("icon_help_template"), true);
+    if (f.weather) return this._field("icon", this.t("default_icon"), control, this.t("weather_default_help"), true);
     const help = f.layout ? `${this.t("icon_help_studio")} ${this.t("layout_icon_note")}` : this.t("icon_help_studio");
     return this._field("icon", this.t("icon"), control, help, true);
   }
 
-  async _drawIconPreview() {
-    const canvas = this._iconPreview;
+  _drawIconPreview() {
+    const value = this._form.icon || "";
+    return this._paintIcon(this._iconPreview, value, () => (this._form.icon || "") === value);
+  }
+
+  /** Draw an icon on a small canvas; `current` says whether it is still the one to show. */
+  async _paintIcon(canvas, value, current = () => true) {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#0b0b0d";
     ctx.fillRect(0, 0, 8, 8);
     // A bare number is a LaMetric icon too, unless the clock has that file.
-    const value = this._form.icon || "";
     const match = /^(?:lametric:)?(\d{1,7})$/.exec(value);
     canvas.title = match ? "" : this.t("icon_on_clock");
     if (!match) {
-      (clockIcon(value, () => this._drawIconPreview()) || []).forEach((color, i) => {
+      (clockIcon(value, () => this._paintIcon(canvas, value, current)) || []).forEach((color, i) => {
         if (!color) return;
         ctx.fillStyle = color;
         ctx.fillRect(i % 8, Math.floor(i / 8), 1, 1);
@@ -1817,7 +1947,7 @@ class AwtrixStudioPanel extends HTMLElement {
       return;
     }
     const pixels = await this._iconPixels(Number(match[1]));
-    if (!pixels || this._form.icon !== value) return;
+    if (!pixels || !current()) return;
     pixels.forEach((value, i) => {
       if (!Number.isInteger(value) || value <= 0) return;
       ctx.fillStyle = parseColor(value);
@@ -1842,8 +1972,10 @@ class AwtrixStudioPanel extends HTMLElement {
     return this._iconCache.get(id);
   }
 
-  _openIconPicker() {
+  /** `onPick(value)` takes the icon instead of the app's own icon field. */
+  _openIconPicker(onPick = null) {
     this._closeIconPicker();
+    this._onIconPick = onPick;
     const search = h("input", { type: "search", class: "picker-search", placeholder: this.t("icon_search_placeholder"),
       "aria-label": this.t("icon_search_placeholder"), maxlength: 64 });
     const grid = h("div", { class: "picker-grid", role: "listbox", "aria-label": this.t("icon_pick") });
@@ -1901,6 +2033,12 @@ class AwtrixStudioPanel extends HTMLElement {
   }
 
   _pickIcon(id) {
+    if (this._onIconPick) {
+      const onPick = this._onIconPick;
+      this._closeIconPicker();
+      onPick(`lametric:${id}`);
+      return;
+    }
     this._form.icon = `lametric:${id}`;
     if (this._iconInput) this._iconInput.value = this._form.icon;
     this._closeIconPicker();
@@ -1944,7 +2082,7 @@ class AwtrixStudioPanel extends HTMLElement {
     const { kind, item } = this._view;
     const f = this._form;
     const box = this._fieldsBox;
-    Array.from(this._modeTabs.children).forEach((tab, i) => tab.setAttribute("aria-selected", ["simple", "template"][i] === f.mode ? "true" : "false"));
+    Array.from(this._modeTabs.children).forEach((tab, i) => tab.setAttribute("aria-selected", this._tabNames[i] === this._modeTab() ? "true" : "false"));
 
     if (kind === "notification") box.append(...this._notificationTriggerFields());
     if (kind === "app" && !item) box.append(this._field("app_name", this.t("app_name"), this._input("app_name", "text", { maxlength: 32, spellcheck: "false" }), this.t("app_name_help"), true));
@@ -1980,7 +2118,7 @@ class AwtrixStudioPanel extends HTMLElement {
       return;
     }
     if (kind !== "indicator") {
-      append(box, this._layoutField(), this._fontFields(), this._segmentsSection(), this._iconField());
+      append(box, this._layoutField(), this._fontFields(), this._segmentsSection(), ...(f.weather ? [this._weatherSection()] : []), this._iconField());
       if (f.segments.length > 1 && !f.layout) {
         box.append(this._field("separator", this.t("separator"), this._input("separator", "text", { maxlength: 8, spellcheck: "false" }),
           this.t("separator_help")));
@@ -2087,6 +2225,7 @@ class AwtrixStudioPanel extends HTMLElement {
     }
     fieldset.append(h("div", { class: "fields" },
       this._field("entity_id", this.t("entity"), this._entityInput(), null, true),
+      this._attributeField(),
       f.layout === "title_value"
         ? this._field("label", this.t("title_label"), this._input("label", "text", { maxlength: 64 }), this.t("title_label_help"))
         : this._field("label", this.t("label"), this._input("label", "text", { maxlength: 64 }), this.t("label_help")),
@@ -2444,9 +2583,18 @@ class AwtrixStudioPanel extends HTMLElement {
     this._gradientNow.textContent = this.t("gradient_now", { value: `${state.state}${unit ? ` ${unit}` : ""}` });
   }
 
-  _setMode(mode) {
-    if (this._form.mode === mode) return;
-    this._form.mode = mode;
+  /** The tab an app is edited in: simple, template, or simple with the weather. */
+  _modeTab() {
+    const f = this._form;
+    if (f.mode === "template") return "template";
+    return f.weather ? "weather" : "simple";
+  }
+
+  _setMode(tab) {
+    if (this._modeTab() === tab) return;
+    this._form.mode = tab === "template" ? "template" : "simple";
+    this._form.weather = tab === "weather";
+    if (tab === "weather") this._startWeather();
     this._renderFields();
     this._refreshPreview();
   }
